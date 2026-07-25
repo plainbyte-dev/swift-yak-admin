@@ -4,7 +4,7 @@ import React from 'react';
 import dynamic from 'next/dynamic';
 
 const CourierUtilizationChartInner = dynamic(
-  () => import('./CourierUtilizationChart'),
+  () => import('./CourierUtilizationChartInner'),  // was: './CourierUtilizationChart'
   { ssr: false, loading: () => <div className="animate-pulse bg-muted rounded-lg w-full h-[160px]" /> }
 );
 
