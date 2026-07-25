@@ -1,11 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import AppLogo from '@/components/ui/AppLogo';
-import { LayoutDashboard, Package, Truck, Building2, Users, MapPin, BarChart3, Settings, ChevronLeft, ChevronRight, LogOut, Search,  } from 'lucide-react';
-import Icon from '@/components/ui/AppIcon';
-
+import { LayoutDashboard, Package, Truck, Building2, Users, MapPin, BarChart3, Settings, ChevronLeft, ChevronRight, LogOut, Search } from 'lucide-react';
+import { getMe, logout, type ApiUser } from '@/lib/api';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -33,7 +33,56 @@ const NAV_GROUPS = [
   },
 ];
 
+// Role codes from the API -> friendly display labels
+const ROLE_LABELS: Record<string, string> = {
+  admin: 'Company Admin',
+  dispatcher: 'Dispatcher',
+  courier: 'Courier',
+};
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  const first = parts[0]?.[0] ?? '';
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+  return (first + last).toUpperCase();
+}
+
 export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProps) {
+  const router = useRouter();
+  const [user, setUser] = useState<ApiUser | null>(null);
+  const [loadingUser, setLoadingUser] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getMe()
+      .then((res) => {
+        if (!cancelled) setUser(res.data);
+      })
+      .catch(() => {
+        // Token missing/expired — request() already clears it on 401.
+        if (!cancelled) {
+          setUser(null);
+          router.replace('/login');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingUser(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  function handleLogout() {
+    logout();
+    router.replace('/login');
+  }
+
+  const initials = user ? getInitials(user.name) : '';
+  const roleLabel = user ? (ROLE_LABELS[user.role] ?? user.role) : '';
+
   return (
     <aside
       className="relative flex flex-col bg-card border-r border-border shrink-0 transition-all duration-300 ease-in-out"
@@ -115,20 +164,31 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
         </Link>
 
         {!collapsed && (
-          <div className="flex items-center gap-2 px-3 py-2 mt-1 rounded-lg hover:bg-muted cursor-pointer transition-colors duration-150">
+          <div className="flex items-center gap-2 px-3 py-2 mt-1 rounded-lg hover:bg-muted transition-colors duration-150">
             <div className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-700 shrink-0">
-              MA
+              {loadingUser ? '' : initials || '?'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-600 text-foreground truncate">Marcus Adeyemi</p>
-              <p className="text-[10px] text-muted-foreground truncate">Company Admin</p>
+              <p className="text-xs font-600 text-foreground truncate">
+                {loadingUser ? 'Loading…' : user?.name ?? 'Unknown user'}
+              </p>
+              <p className="text-[10px] text-muted-foreground truncate">
+                {loadingUser ? '' : roleLabel}
+              </p>
             </div>
-            <LogOut size={14} className="text-muted-foreground shrink-0" />
+            <button
+              onClick={handleLogout}
+              aria-label="Logout"
+              title="Logout"
+              className="text-muted-foreground hover:text-foreground shrink-0"
+            >
+              <LogOut size={14} />
+            </button>
           </div>
         )}
 
         {collapsed && (
-          <button className="sidebar-nav-item justify-center" title="Logout">
+          <button onClick={handleLogout} className="sidebar-nav-item justify-center" title="Logout">
             <LogOut size={18} className="shrink-0" />
           </button>
         )}
