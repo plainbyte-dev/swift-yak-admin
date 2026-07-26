@@ -5,6 +5,32 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 const TOKEN_KEY = 'cd_token';
 
 
+ 
+// NEW: add alongside getMe
+export function updateMe(data: Partial<{
+  name: string;
+  phone: string;
+  company: string;
+  timezone: string;
+  language: string;
+  dateFormat: string;
+  timeFormat: string;
+  theme: ApiUser['theme'];
+  notifications: Partial<ApiUser['notifications']>;
+}>) {
+  return request<{ user: ApiUser }>('/auth/me', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+ 
+export function changePassword(data: { currentPassword: string; newPassword: string }) {
+  return request<{ success: boolean; message: string }>('/auth/change-password', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+ 
 export function getReportsSummary(period: ReportPeriod) {
   return request<{ data: ReportsSummary }>(`/reports/summary?period=${period}`);
 }
@@ -207,7 +233,7 @@ export function login(data: { email: string; password: string }) {
 }
 
 export function getMe() {
-  return request<{ data: ApiUser }>('/auth/me');
+  return request<{ user: ApiUser }>('/auth/me');
 }
 
 export function logout() {
@@ -363,3 +389,60 @@ export function getDashboardMetrics() {
 }
 
 export { ApiError };
+
+// ─── Avatar ─────────────────────────────────────────────────────────────────
+
+export async function uploadAvatar(file: File) {
+  const token = typeof window !== 'undefined' ? window.localStorage.getItem(TOKEN_KEY) : null;
+
+  const formData = new FormData();
+  formData.append('avatar', file);
+
+  const res = await fetch(`${API_BASE}/auth/avatar`, {
+    method: 'POST',
+    headers: {
+      // Do NOT set Content-Type here — the browser sets the correct
+      // multipart boundary automatically when the body is FormData.
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  });
+
+  let body: any = null;
+  try {
+    body = await res.json();
+  } catch {
+    // non-JSON response, fall through to status check
+  }
+
+  if (!res.ok) {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      window.localStorage.removeItem(TOKEN_KEY);
+    }
+    throw new ApiError(res.status, body?.message || `Avatar upload failed with ${res.status}`);
+  }
+
+  return body as { success: boolean; user: ApiUser };
+}
+
+// ─── Two-Factor Authentication ─────────────────────────────────────────────
+
+export function setupTwoFactor() {
+  return request<{ success: boolean; secret: string; qrCode: string }>('/auth/2fa/setup', {
+    method: 'POST',
+  });
+}
+
+export function verifyTwoFactor(code: string) {
+  return request<{ success: boolean; message: string }>('/auth/2fa/verify', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+}
+
+export function disableTwoFactor(password: string) {
+  return request<{ success: boolean; message: string }>('/auth/2fa/disable', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  });
+}

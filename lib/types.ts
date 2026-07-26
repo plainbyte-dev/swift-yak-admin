@@ -14,6 +14,37 @@ export interface ApiCourier {
   deliveriesLeft?: number;
 }
 
+// Add to lib/types.ts:
+
+export interface NotificationPreferences {
+  newShipment: boolean;
+  statusUpdate: boolean;
+  courierAlert: boolean;
+  weeklyReport: boolean;
+  smsAlerts: boolean;
+}
+
+// Extend the existing ApiUser interface with these fields:
+export interface ApiUser {
+  _id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'dispatcher' | 'viewer';
+  company: string;
+  isActive: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+  phone: string;
+  timezone: string;
+  language: string;
+  dateFormat: string;
+  timeFormat: string;
+  theme: 'light' | 'dark' | 'system';
+  notifications: NotificationPreferences;
+  avatarUrl?: string;
+  twoFactorEnabled: boolean;
+}
+
 export interface VolumeDataPoint {
   day: string;           // 'Mon', 'Tue', ... or ISO date for longer ranges
   shipments: number;

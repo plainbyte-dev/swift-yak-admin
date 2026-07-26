@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import AppLogo from '@/components/ui/AppLogo';
 import { LayoutDashboard, Package, Truck, Building2, Users, MapPin, BarChart3, Settings, ChevronLeft, ChevronRight, LogOut, Search } from 'lucide-react';
-import { getMe, logout, type ApiUser } from '@/lib/api';
-
+import { getMe, logout } from '@/lib/api';
+import { ApiUser } from '@/lib/types';
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
@@ -51,13 +51,14 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
   const router = useRouter();
   const [user, setUser] = useState<ApiUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     getMe()
       .then((res) => {
-        if (!cancelled) setUser(res.data);
+        if (!cancelled) setUser(res.user);
       })
       .catch(() => {
         // Token missing/expired — request() already clears it on 401.
@@ -75,9 +76,17 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
     };
   }, [router]);
 
-  function handleLogout() {
+  function handleLogoutClick() {
+    setShowLogoutConfirm(true);
+  }
+
+  function confirmLogout() {
     logout();
     router.replace('/login');
+  }
+
+  function cancelLogout() {
+    setShowLogoutConfirm(false);
   }
 
   const initials = user ? getInitials(user.name) : '';
@@ -165,8 +174,12 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
 
         {!collapsed && (
           <div className="flex items-center gap-2 px-3 py-2 mt-1 rounded-lg hover:bg-muted transition-colors duration-150">
-            <div className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-700 shrink-0">
-              {loadingUser ? '' : initials || '?'}
+            <div className="h-7 w-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-700 shrink-0 overflow-hidden">
+              {user?.avatarUrl ? (
+                <img src={user.avatarUrl} alt={user.name} className="h-full w-full object-cover" />
+              ) : (
+                loadingUser ? '' : initials || '?'
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-600 text-foreground truncate">
@@ -177,7 +190,7 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
               </p>
             </div>
             <button
-              onClick={handleLogout}
+              onClick={handleLogoutClick}
               aria-label="Logout"
               title="Logout"
               className="text-muted-foreground hover:text-foreground shrink-0"
@@ -188,7 +201,7 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
         )}
 
         {collapsed && (
-          <button onClick={handleLogout} className="sidebar-nav-item justify-center" title="Logout">
+          <button onClick={handleLogoutClick} className="sidebar-nav-item justify-center" title="Logout">
             <LogOut size={18} className="shrink-0" />
           </button>
         )}
@@ -202,6 +215,43 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
       >
         {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
       </button>
+
+      {/* Logout confirmation modal */}
+      {showLogoutConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="logout-confirm-title"
+          onClick={cancelLogout}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="logout-confirm-title" className="text-base font-700 text-foreground">
+              Log out?
+            </h2>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              You'll need to sign in again to access your account.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={cancelLogout}
+                className="px-4 py-2 text-sm font-600 rounded-lg border border-border text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLogout}
+                className="px-4 py-2 text-sm font-600 rounded-lg bg-destructive text-white hover:bg-destructive/90 transition-colors"
+              >
+                Log out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
