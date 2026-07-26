@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import AppLogo from '@/components/ui/AppLogo';
 import { LayoutDashboard, Package, Truck, Building2, Users, MapPin, BarChart3, Settings, ChevronLeft, ChevronRight, LogOut, Search } from 'lucide-react';
-import { getMe, logout } from '@/lib/api';
+import { getMe, logout, getShipments } from '@/lib/api';
 import { ApiUser } from '@/lib/types';
+
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
@@ -17,18 +18,18 @@ const NAV_GROUPS = [
   {
     label: 'Operations',
     items: [
-      { label: 'Dashboard', icon: LayoutDashboard, href: '/stats-dashboard', badge: null },
-      { label: 'Shipments', icon: Package, href: '/shipments', badge: '3' },
-      { label: 'Couriers', icon: Truck, href: '/couriers', badge: null },
-      { label: 'Live Tracking', icon: MapPin, href: '/tracking', badge: null },
+      { label: 'Dashboard', icon: LayoutDashboard, href: '/stats-dashboard', badgeKey: null },
+      { label: 'Shipments', icon: Package, href: '/shipments', badgeKey: 'shipments' as const },
+      { label: 'Couriers', icon: Truck, href: '/couriers', badgeKey: null },
+      { label: 'Live Tracking', icon: MapPin, href: '/tracking', badgeKey: null },
     ],
   },
   {
     label: 'Management',
     items: [
-      { label: 'Companies', icon: Building2, href: '/companies', badge: null },
-      { label: 'Users', icon: Users, href: '/users', badge: null },
-      { label: 'Reports', icon: BarChart3, href: '/reports', badge: null },
+      { label: 'Companies', icon: Building2, href: '/companies', badgeKey: null },
+      { label: 'Users', icon: Users, href: '/users', badgeKey: null },
+      { label: 'Reports', icon: BarChart3, href: '/reports', badgeKey: null },
     ],
   },
 ];
@@ -52,6 +53,7 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
   const [user, setUser] = useState<ApiUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [pendingShipmentCount, setPendingShipmentCount] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +77,33 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
       cancelled = true;
     };
   }, [router]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // Badge shows the count of shipments that need attention (status: pending).
+    // Adjust the status filter below if the badge should represent something
+    // else (e.g. in_transit, or all shipments regardless of status).
+    getShipments({ status: 'pending', perPage: 1 })
+      .then((res) => {
+        if (!cancelled) {
+          // Assumes Paginated<T> exposes a `total` count of all matching
+          // records server-side, not just this page's `data.length`.
+          // If Paginated<T> uses a different field name (e.g. `count`,
+          // `meta.total`), update the line below to match.
+          const total = (res as any).total ?? res.data.length;
+          setPendingShipmentCount(total);
+        }
+      })
+      .catch(() => {
+        // Non-fatal — just hide the badge if the count can't be loaded.
+        if (!cancelled) setPendingShipmentCount(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function handleLogoutClick() {
     setShowLogoutConfirm(true);
@@ -132,6 +161,11 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
               {group.items.map((item) => {
                 const isActive = activePath === item.href || (item.href === '/stats-dashboard' && activePath === '/');
                 const Icon = item.icon;
+                const badgeValue =
+                  item.badgeKey === 'shipments' && pendingShipmentCount != null && pendingShipmentCount > 0
+                    ? String(pendingShipmentCount)
+                    : null;
+
                 return (
                   <Link
                     key={`nav-${item.href}`}
@@ -143,14 +177,14 @@ export default function Sidebar({ collapsed, onToggle, activePath }: SidebarProp
                     {!collapsed && (
                       <>
                         <span className="flex-1 truncate">{item.label}</span>
-                        {item.badge && (
+                        {badgeValue && (
                           <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-warning text-white text-[10px] font-700 px-1.5">
-                            {item.badge}
+                            {badgeValue}
                           </span>
                         )}
                       </>
                     )}
-                    {collapsed && item.badge && (
+                    {collapsed && badgeValue && (
                       <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-warning" />
                     )}
                   </Link>

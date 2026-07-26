@@ -2,18 +2,18 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { Plus, Search, Eye, X, ChevronLeft, ChevronRight, MapPin, User, ArrowRight, ChevronDown, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, Search, Eye, ChevronLeft, ChevronRight, MapPin, User, ArrowRight, ChevronDown, AlertCircle } from 'lucide-react';
 import { ShipmentStatusBadge, ShipmentStatus } from '@/components/ui/StatusBadge';
 import {
   getShipments,
   getCouriers,
-  createShipment,
   assignCourier as assignCourierApi,
   updateShipmentStatus as updateShipmentStatusApi,
   ApiError,
   type GetShipmentsParams,
 } from '@/lib/api';
 import type { ApiShipment, ApiCourier } from '@/lib/types';
+import NewShipmentModal from '@/app/components/NewShipmentModal';
 
 const STATUS_TRANSITIONS: Record<ShipmentStatus, ShipmentStatus[]> = {
   pending: ['assigned', 'cancelled'],
@@ -33,17 +33,6 @@ const STATUS_FILTERS: { key: ShipmentStatus | 'all'; label: string; color: strin
   { key: 'failed', label: 'Failed', color: 'text-destructive' },
 ];
 
-const EMPTY_FORM = {
-  recipient: '',
-  origin: '',
-  destination: '',
-  weightKg: '',
-  phone: '',
-  notes: '',
-  eta: '',
-  courierId: '',
-};
-
 const PER_PAGE = 8;
 
 export default function ShipmentsPage() {
@@ -62,9 +51,6 @@ export default function ShipmentsPage() {
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
 
   const [viewTarget, setViewTarget] = useState<ApiShipment | null>(null);
   const [assignOpen, setAssignOpen] = useState<string | null>(null);
@@ -135,44 +121,11 @@ export default function ShipmentsPage() {
     refreshCounts();
   }, [refreshCounts]);
 
-  // ── Create shipment ──────────────────────────────────────────────────────
-  async function handleCreate() {
-    if (!form.recipient.trim() || !form.origin.trim() || !form.destination.trim() || !form.weightKg) {
-      setCreateError('Recipient, origin, destination, and weight are required.');
-      return;
-    }
-    const weightKg = Number(form.weightKg);
-    if (Number.isNaN(weightKg) || weightKg <= 0) {
-      setCreateError('Enter a valid weight in kg.');
-      return;
-    }
-
-    setCreating(true);
-    setCreateError(null);
-    try {
-      const { data: created } = await createShipment({
-        recipient: form.recipient.trim(),
-        origin: form.origin.trim(),
-        destination: form.destination.trim(),
-        weightKg,
-        phone: form.phone.trim() || undefined,
-        notes: form.notes.trim() || undefined,
-        eta: form.eta || undefined,
-      });
-
-      if (form.courierId) {
-        await assignCourierApi(created._id, form.courierId);
-      }
-
-      setModalOpen(false);
-      setForm(EMPTY_FORM);
-      setPage(1);
-      await Promise.all([fetchShipments(), refreshCounts()]);
-    } catch (err) {
-      setCreateError(err instanceof ApiError ? err.message : 'Failed to create shipment. Please try again.');
-    } finally {
-      setCreating(false);
-    }
+  // ── Handle shipment created via NewShipmentModal ─────────────────────────
+  async function handleShipmentCreated(_created: ApiShipment) {
+    setModalOpen(false);
+    setPage(1);
+    await Promise.all([fetchShipments(), refreshCounts()]);
   }
 
   // ── Assign courier ───────────────────────────────────────────────────────
@@ -212,7 +165,7 @@ export default function ShipmentsPage() {
             <p className="text-sm text-muted-foreground mt-0.5">Create, assign, and track all shipments</p>
           </div>
           <button
-            onClick={() => { setModalOpen(true); setCreateError(null); }}
+            onClick={() => setModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-600 hover:bg-primary/90 transition-colors"
           >
             <Plus size={16} /> New Shipment
@@ -400,67 +353,11 @@ export default function ShipmentsPage() {
       </div>
 
       {/* Create Shipment Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-card border border-border rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card">
-              <h2 className="text-base font-700 text-foreground">New Shipment</h2>
-              <button onClick={() => setModalOpen(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X size={16} /></button>
-            </div>
-            <div className="px-6 py-5 space-y-4">
-              {createError && (
-                <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                  <AlertCircle size={14} className="shrink-0" />
-                  <span>{createError}</span>
-                </div>
-              )}
-              {[
-                { label: 'Recipient Name / Company', key: 'recipient', placeholder: 'e.g. Northgate Retail Ltd.' },
-                { label: 'Pickup Address', key: 'origin', placeholder: '245 W 34th St, New York, NY' },
-                { label: 'Delivery Address', key: 'destination', placeholder: '88 Canal St, New York, NY' },
-                { label: 'Weight (kg)', key: 'weightKg', placeholder: 'e.g. 3.2', type: 'number' },
-                { label: 'Recipient Phone', key: 'phone', placeholder: '+1 212-555-0000' },
-                { label: 'Notes', key: 'notes', placeholder: 'Special instructions...' },
-              ].map(({ label, key, placeholder, type }) => (
-                <div key={key}>
-                  <label className="block text-xs font-600 text-muted-foreground mb-1.5">{label}</label>
-                  <input
-                    type={type || 'text'}
-                    value={(form as Record<string, string>)[key]}
-                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                    placeholder={placeholder}
-                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  />
-                </div>
-              ))}
-              <div>
-                <label className="block text-xs font-600 text-muted-foreground mb-1.5">Assign Courier (optional)</label>
-                <select
-                  value={form.courierId}
-                  onChange={(e) => setForm((f) => ({ ...f, courierId: e.target.value }))}
-                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <option value="">Unassigned</option>
-                  {couriers.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.vehicle})</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border sticky bottom-0 bg-card">
-              <button onClick={() => setModalOpen(false)} disabled={creating} className="px-4 py-2 text-sm font-600 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
-                Cancel
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={creating}
-                className="flex items-center gap-2 px-5 py-2 text-sm font-600 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-60"
-              >
-                {creating && <Loader2 size={14} className="animate-spin" />}
-                {creating ? 'Creating…' : 'Create Shipment'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <NewShipmentModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onCreated={handleShipmentCreated}
+      />
 
       {/* Detail Modal */}
       {viewTarget && (
@@ -473,7 +370,7 @@ export default function ShipmentsPage() {
                   {new Date(viewTarget.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
-              <button onClick={() => setViewTarget(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X size={16} /></button>
+              <button onClick={() => setViewTarget(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">✕</button>
             </div>
             <div className="px-6 py-5 space-y-5">
               <div className="flex items-center justify-between">
