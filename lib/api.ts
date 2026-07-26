@@ -1,8 +1,25 @@
-import type { ApiCourier, ApiShipment, DashboardMetrics, Paginated } from './types';
+import type { ApiCourier, ApiShipment, DashboardMetrics, ApiUser, Paginated, ApiCompany, ReportPeriod, CourierPerformance, VolumeDataPoint, CompanyPerformance, ReportsSummary } from './types';
 import type { ShipmentStatus, CourierStatus } from '@/components/ui/StatusBadge';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 const TOKEN_KEY = 'cd_token';
+
+
+export function getReportsSummary(period: ReportPeriod) {
+  return request<{ data: ReportsSummary }>(`/reports/summary?period=${period}`);
+}
+
+export function getVolumeTrend(period: ReportPeriod) {
+  return request<{ data: VolumeDataPoint[] }>(`/reports/volume?period=${period}`);
+}
+
+export function getCompanyPerformance(period: ReportPeriod) {
+  return request<{ data: CompanyPerformance[] }>(`/reports/companies?period=${period}`);
+}
+
+export function getCourierLeaderboard(period: ReportPeriod) {
+  return request<{ data: CourierPerformance[] }>(`/reports/couriers?period=${period}`);
+}
 
 class ApiError extends Error {
   status: number;
@@ -11,6 +28,110 @@ class ApiError extends Error {
     this.status = status;
     this.name = 'ApiError';
   }
+}
+
+export interface GetUsersParams {
+  search?: string;
+  role?: ApiUser['role'] | 'all';
+  page?: number;
+  perPage?: number;
+}
+
+export function getUsers(params: GetUsersParams = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params).reduce((acc, [k, v]) => {
+      if (v !== undefined) acc[k] = String(v);
+      return acc;
+    }, {} as Record<string, string>)
+  ).toString();
+
+  return request<Paginated<ApiUser>>(`/users${query ? `?${query}` : ''}`);
+}
+
+export function updateUser(id: string, data: Partial<{
+  name: string;
+  role: ApiUser['role'];
+  company: string;
+  isActive: boolean;
+}>) {
+  return request<{ data: ApiUser }>(`/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteUser(id: string) {
+  return request<void>(`/users/${id}`, { method: 'DELETE' });
+}
+export interface GetCompaniesParams {
+  search?: string;
+  status?: ApiCompany['status'] | 'all';
+  page?: number;
+  perPage?: number;
+}
+
+export function getCompanies(params: GetCompaniesParams = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params).reduce((acc, [k, v]) => {
+      if (v !== undefined) acc[k] = String(v);
+      return acc;
+    }, {} as Record<string, string>)
+  ).toString();
+
+  return request<Paginated<ApiCompany>>(`/companies${query ? `?${query}` : ''}`);
+}
+
+export function getCompany(id: string) {
+  return request<{ data: ApiCompany }>(`/companies/${id}`);
+}
+
+export function createCompany(data: {
+  name: string;
+  contact: string;
+  email: string;
+  phone?: string;
+  address?: string;
+  status?: ApiCompany['status'];
+  plan?: ApiCompany['plan'];
+}) {
+  return request<{ data: ApiCompany }>('/companies', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateCompany(id: string, data: Partial<{
+  name: string;
+  contact: string;
+  email: string;
+  phone: string;
+  address: string;
+  plan: ApiCompany['plan'];
+}>) {
+  return request<{ data: ApiCompany }>(`/companies/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateCompanyStatus(id: string, status: ApiCompany['status']) {
+  return request<{ data: ApiCompany }>(`/companies/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function deleteCompany(id: string) {
+  return request<void>(`/companies/${id}`, { method: 'DELETE' });
+}
+
+export interface ShipmentEvent {
+  status: ApiShipment['status'];
+  changedAt: string;
+}
+
+export function getShipmentEvents(shipmentId: string) {
+  return request<{ data: ShipmentEvent[] }>(`/shipments/${shipmentId}/events`);
 }
 
 interface RequestOptions extends RequestInit {
@@ -54,14 +175,6 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
 export type UserRole = 'admin' | 'dispatcher' | 'courier' | string;
 
-export interface ApiUser {
-  id: string;
-  name: string;
-  email: string;
-  company?: string;
-  role: UserRole;
-  createdAt: string;
-}
 
 export interface AuthResponse {
   token: string;

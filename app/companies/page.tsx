@@ -1,36 +1,22 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
 import {
   Building2, Plus, Search, MoreHorizontal, Edit2, Trash2,
   CheckCircle, Clock, XCircle, Phone, Mail, MapPin, X,
-  ChevronLeft, ChevronRight, Eye,
+  ChevronLeft, ChevronRight, Eye, Loader2, AlertCircle,
 } from 'lucide-react';
-
-interface Company {
-  id: string;
-  name: string;
-  contact: string;
-  email: string;
-  phone: string;
-  address: string;
-  status: 'active' | 'pending' | 'suspended';
-  shipments: number;
-  joinedAt: string;
-  plan: string;
-}
-
-const INITIAL_COMPANIES: Company[] = [
-  { id: 'co-001', name: 'Meridian Logistics', contact: 'Marcus Adeyemi', email: 'marcus.adeyemi@meridianlogistics.com', phone: '+1 212-555-0100', address: '200 Park Ave, New York, NY', status: 'active', shipments: 1248, joinedAt: 'Jan 12, 2024', plan: 'Enterprise' },
-  { id: 'co-002', name: 'Northgate Retail Ltd.', contact: 'Sarah Okonkwo', email: 'sarah@northgateretail.com', phone: '+1 212-555-0201', address: '88 Canal St, New York, NY', status: 'active', shipments: 543, joinedAt: 'Mar 5, 2024', plan: 'Business' },
-  { id: 'co-003', name: 'Harborview Clinic', contact: 'Dr. James Patel', email: 'jpatel@harborviewclinic.com', phone: '+1 212-555-0302', address: '320 E 42nd St, New York, NY', status: 'active', shipments: 312, joinedAt: 'Feb 18, 2024', plan: 'Business' },
-  { id: 'co-004', name: 'Apex Consulting', contact: 'Linda Zhao', email: 'linda.zhao@apexconsulting.com', phone: '+1 212-555-0403', address: '200 Park Ave, New York, NY', status: 'pending', shipments: 0, joinedAt: 'Jul 20, 2025', plan: 'Starter' },
-  { id: 'co-005', name: 'Greenfield Foods', contact: 'Carlos Mendes', email: 'carlos@greenfieldfoods.com', phone: '+1 212-555-0504', address: '900 3rd Ave, New York, NY', status: 'active', shipments: 876, joinedAt: 'Nov 3, 2023', plan: 'Enterprise' },
-  { id: 'co-006', name: 'Pacific Imports Co.', contact: 'Yuki Tanaka', email: 'yuki@pacificimports.com', phone: '+1 212-555-0605', address: '411 W 35th St, New York, NY', status: 'suspended', shipments: 89, joinedAt: 'Jun 14, 2024', plan: 'Starter' },
-  { id: 'co-007', name: 'Metro Office Supplies', contact: 'Ben Adler', email: 'ben@metrooffice.com', phone: '+1 212-555-0706', address: '1251 6th Ave, New York, NY', status: 'active', shipments: 421, joinedAt: 'Apr 22, 2024', plan: 'Business' },
-  { id: 'co-008', name: 'Sunrise Pharmacy', contact: 'Amara Diallo', email: 'amara@sunrisepharmacy.com', phone: '+1 212-555-0807', address: '500 7th Ave, New York, NY', status: 'active', shipments: 198, joinedAt: 'May 9, 2024', plan: 'Starter' },
-];
+import {
+  getCompanies,
+  createCompany,
+  updateCompany,
+  updateCompanyStatus,
+  deleteCompany,
+  ApiError,
+  type GetCompaniesParams,
+} from '@/lib/api';
+import type { ApiCompany } from '@/lib/types';
 
 const STATUS_CONFIG = {
   active: { label: 'Active', icon: CheckCircle, className: 'text-success bg-success/10' },
@@ -44,53 +30,176 @@ const PLAN_COLORS: Record<string, string> = {
   Starter: 'text-muted-foreground bg-muted',
 };
 
-const EMPTY_FORM: Omit<Company, 'id' | 'shipments' | 'joinedAt'> = {
-  name: '', contact: '', email: '', phone: '', address: '', status: 'pending', plan: 'Starter',
+const EMPTY_FORM = {
+  name: '',
+  contact: '',
+  email: '',
+  phone: '',
+  address: '',
+  status: 'pending' as ApiCompany['status'],
+  plan: 'Starter' as ApiCompany['plan'],
 };
 
+const PER_PAGE = 6;
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 export default function CompaniesPage() {
-  const [companies, setCompanies] = useState<Company[]>(INITIAL_COMPANIES);
+  const [companies, setCompanies] = useState<ApiCompany[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editTarget, setEditTarget] = useState<Company | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
-  const [viewTarget, setViewTarget] = useState<Company | null>(null);
+  const [statusFilter, setStatusFilter] = useState<ApiCompany['status'] | 'all'>('all');
   const [page, setPage] = useState(1);
-  const PER_PAGE = 6;
+  const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const filtered = companies.filter((c) => {
-    const matchSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.contact.toLowerCase().includes(search.toLowerCase()) ||
-      c.email.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === 'all' || c.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-  const paginated = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<ApiCompany | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const openAdd = () => { setEditTarget(null); setForm(EMPTY_FORM); setModalOpen(true); };
-  const openEdit = (c: Company) => { setEditTarget(c); setForm({ name: c.name, contact: c.contact, email: c.email, phone: c.phone, address: c.address, status: c.status, plan: c.plan }); setModalOpen(true); setMenuOpen(null); };
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [viewTarget, setViewTarget] = useState<ApiCompany | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const handleSave = () => {
-    if (!form.name.trim()) return;
-    if (editTarget) {
-      setCompanies((prev) => prev.map((c) => c.id === editTarget.id ? { ...c, ...form } : c));
-    } else {
-      const newCo: Company = { ...form, id: `co-${Date.now()}`, shipments: 0, joinedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) };
-      setCompanies((prev) => [newCo, ...prev]);
+  const fetchCompanies = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params: GetCompaniesParams = { search: search || undefined, status: statusFilter, page, perPage: PER_PAGE };
+      const res = await getCompanies(params);
+      setCompanies(res.data);
+      setTotal(res.pagination.total);
+      setTotalPages(res.pagination.totalPages);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not reach the CourierDesk API');
+    } finally {
+      setLoading(false);
     }
-    setModalOpen(false);
-  };
+  }, [search, statusFilter, page]);
 
-  const handleDelete = (id: string) => { setCompanies((prev) => prev.filter((c) => c.id !== id)); setMenuOpen(null); };
+  useEffect(() => {
+    fetchCompanies();
+  }, [fetchCompanies]);
 
-  const toggleStatus = (id: string) => {
-    setCompanies((prev) => prev.map((c) => c.id === id ? { ...c, status: c.status === 'active' ? 'suspended' : 'active' } : c));
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setPage(1), 400);
+  }
+
+  const refreshCounts = useCallback(async () => {
+    try {
+      const statuses: (ApiCompany['status'] | 'all')[] = ['all', 'active', 'pending', 'suspended'];
+      const results = await Promise.all(
+        statuses.map((s) => getCompanies({ status: s, perPage: 1 }).then((res) => [s, res.pagination.total] as const))
+      );
+      setStatusCounts(Object.fromEntries(results));
+    } catch {
+      // Non-fatal
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshCounts();
+  }, [refreshCounts]);
+
+  function openAdd() {
+    setEditTarget(null);
+    setForm(EMPTY_FORM);
+    setSaveError(null);
+    setModalOpen(true);
+  }
+
+  function openEdit(c: ApiCompany) {
+    setEditTarget(c);
+    setForm({
+      name: c.name,
+      contact: c.contact,
+      email: c.email,
+      phone: c.phone ?? '',
+      address: c.address ?? '',
+      status: c.status,
+      plan: c.plan,
+    });
+    setSaveError(null);
+    setModalOpen(true);
     setMenuOpen(null);
-  };
+  }
+
+  async function handleSave() {
+    if (!form.name.trim() || !form.contact.trim() || !form.email.trim()) {
+      setSaveError('Company name, contact, and email are required.');
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+    try {
+      if (editTarget) {
+        const { data: updated } = await updateCompany(editTarget._id, {
+          name: form.name.trim(),
+          contact: form.contact.trim(),
+          email: form.email.trim(),
+          phone: form.phone.trim() || undefined,
+          address: form.address.trim() || undefined,
+          plan: form.plan,
+        });
+        setCompanies((prev) => prev.map((c) => (c._id === updated._id ? updated : c)));
+      } else {
+        const { data: created } = await createCompany({
+          name: form.name.trim(),
+          contact: form.contact.trim(),
+          email: form.email.trim(),
+          phone: form.phone.trim() || undefined,
+          address: form.address.trim() || undefined,
+          status: form.status,
+          plan: form.plan,
+        });
+        setCompanies((prev) => [created, ...prev]);
+      }
+      setModalOpen(false);
+      refreshCounts();
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.message : 'Failed to save company. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setActionError(null);
+    setMenuOpen(null);
+    try {
+      await deleteCompany(id);
+      setCompanies((prev) => prev.filter((c) => c._id !== id));
+      refreshCounts();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Failed to delete company.');
+    }
+  }
+
+  async function toggleStatus(c: ApiCompany) {
+    setActionError(null);
+    setMenuOpen(null);
+    const next = c.status === 'active' ? 'suspended' : 'active';
+    try {
+      const { data: updated } = await updateCompanyStatus(c._id, next);
+      setCompanies((prev) => prev.map((x) => (x._id === updated._id ? updated : x)));
+      if (viewTarget?._id === c._id) setViewTarget(updated);
+      refreshCounts();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Failed to update status.');
+    }
+  }
 
   return (
     <AppLayout activePath="/companies">
@@ -106,23 +215,32 @@ export default function CompaniesPage() {
           </button>
         </div>
 
+        {actionError && (
+          <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <AlertCircle size={14} className="shrink-0" />
+            <span>{actionError}</span>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1 max-w-sm">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Search companies..."
               className="w-full pl-9 pr-4 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
           <div className="flex gap-2">
-            {['all', 'active', 'pending', 'suspended'].map((s) => (
+            {(['all', 'active', 'pending', 'suspended'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => { setStatusFilter(s); setPage(1); }}
-                className={`px-3 py-2 text-xs font-600 rounded-lg capitalize transition-colors ${statusFilter === s ? 'bg-primary text-white' : 'bg-card border border-border text-muted-foreground hover:bg-muted'}`}
+                className={`px-3 py-2 text-xs font-600 rounded-lg capitalize transition-colors ${
+                  statusFilter === s ? 'bg-primary text-white' : 'bg-card border border-border text-muted-foreground hover:bg-muted'
+                }`}
               >
                 {s === 'all' ? 'All' : s}
               </button>
@@ -133,14 +251,14 @@ export default function CompaniesPage() {
         {/* Stats row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
-            { label: 'Total Companies', value: companies.length, color: 'text-foreground' },
-            { label: 'Active', value: companies.filter((c) => c.status === 'active').length, color: 'text-success' },
-            { label: 'Pending', value: companies.filter((c) => c.status === 'pending').length, color: 'text-warning' },
-            { label: 'Suspended', value: companies.filter((c) => c.status === 'suspended').length, color: 'text-destructive' },
+            { label: 'Total Companies', value: statusCounts.all, color: 'text-foreground' },
+            { label: 'Active', value: statusCounts.active, color: 'text-success' },
+            { label: 'Pending', value: statusCounts.pending, color: 'text-warning' },
+            { label: 'Suspended', value: statusCounts.suspended, color: 'text-destructive' },
           ].map((stat) => (
             <div key={stat.label} className="bg-card border border-border rounded-xl p-4">
               <p className="text-xs text-muted-foreground">{stat.label}</p>
-              <p className={`text-2xl font-700 mt-1 ${stat.color}`}>{stat.value}</p>
+              <p className={`text-2xl font-700 mt-1 ${stat.color}`}>{stat.value ?? '—'}</p>
             </div>
           ))}
         </div>
@@ -155,69 +273,80 @@ export default function CompaniesPage() {
                   <th className="text-left px-5 py-3 text-xs font-600 text-muted-foreground uppercase tracking-wide">Contact</th>
                   <th className="text-left px-5 py-3 text-xs font-600 text-muted-foreground uppercase tracking-wide">Status</th>
                   <th className="text-left px-5 py-3 text-xs font-600 text-muted-foreground uppercase tracking-wide">Plan</th>
-                  <th className="text-left px-5 py-3 text-xs font-600 text-muted-foreground uppercase tracking-wide">Shipments</th>
                   <th className="text-left px-5 py-3 text-xs font-600 text-muted-foreground uppercase tracking-wide">Joined</th>
                   <th className="px-5 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {paginated.map((company) => {
-                  const sc = STATUS_CONFIG[company.status];
-                  const StatusIcon = sc.icon;
-                  return (
-                    <tr key={company.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                            <Building2 size={16} className="text-primary" />
-                          </div>
-                          <div>
-                            <p className="font-600 text-foreground">{company.name}</p>
-                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><MapPin size={10} />{company.address}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <p className="font-500 text-foreground">{company.contact}</p>
-                        <div className="flex items-center gap-3 mt-0.5">
-                          <span className="text-xs text-muted-foreground flex items-center gap-1"><Mail size={10} />{company.email}</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-600 ${sc.className}`}>
-                          <StatusIcon size={11} />{sc.label}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-600 ${PLAN_COLORS[company.plan]}`}>{company.plan}</span>
-                      </td>
-                      <td className="px-5 py-3.5 font-600 text-foreground">{company.shipments.toLocaleString()}</td>
-                      <td className="px-5 py-3.5 text-muted-foreground text-xs">{company.joinedAt}</td>
-                      <td className="px-5 py-3.5">
-                        <div className="relative flex items-center gap-1 justify-end">
-                          <button onClick={() => setViewTarget(company)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"><Eye size={15} /></button>
-                          <button onClick={() => setMenuOpen(menuOpen === company.id ? null : company.id)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"><MoreHorizontal size={15} /></button>
-                          {menuOpen === company.id && (
-                            <div className="absolute right-0 top-8 z-20 bg-card border border-border rounded-xl shadow-lg py-1 min-w-[160px]">
-                              <button onClick={() => openEdit(company)} className="flex items-center gap-2 w-full px-4 py-2 text-sm hover:bg-muted text-foreground"><Edit2 size={14} />Edit</button>
-                              <button onClick={() => toggleStatus(company.id)} className="flex items-center gap-2 w-full px-4 py-2 text-sm hover:bg-muted text-foreground">{company.status === 'active' ? <><XCircle size={14} />Suspend</> : <><CheckCircle size={14} />Activate</>}</button>
-                              <button onClick={() => handleDelete(company.id)} className="flex items-center gap-2 w-full px-4 py-2 text-sm hover:bg-muted text-destructive"><Trash2 size={14} />Delete</button>
-                            </div>
-                          )}
-                        </div>
+                {loading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <tr key={`skeleton-${i}`}>
+                      <td colSpan={6} className="px-5 py-4">
+                        <div className="h-4 bg-muted rounded animate-pulse w-full" />
                       </td>
                     </tr>
-                  );
-                })}
-                {paginated.length === 0 && (
-                  <tr><td colSpan={7} className="px-5 py-12 text-center text-muted-foreground text-sm">No companies found</td></tr>
+                  ))
+                ) : error ? (
+                  <tr><td colSpan={6} className="px-5 py-12 text-center text-danger text-sm">{error}</td></tr>
+                ) : companies.length === 0 ? (
+                  <tr><td colSpan={6} className="px-5 py-12 text-center text-muted-foreground text-sm">No companies found</td></tr>
+                ) : (
+                  companies.map((company) => {
+                    const sc = STATUS_CONFIG[company.status];
+                    const StatusIcon = sc.icon;
+                    return (
+                      <tr key={company._id} className="hover:bg-muted/30 transition-colors">
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                              <Building2 size={16} className="text-primary" />
+                            </div>
+                            <div>
+                              <p className="font-600 text-foreground">{company.name}</p>
+                              {company.address && (
+                                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><MapPin size={10} />{company.address}</p>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <p className="font-500 text-foreground">{company.contact}</p>
+                          <span className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><Mail size={10} />{company.email}</span>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-600 ${sc.className}`}>
+                            <StatusIcon size={11} />{sc.label}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-600 ${PLAN_COLORS[company.plan]}`}>{company.plan}</span>
+                        </td>
+                        <td className="px-5 py-3.5 text-muted-foreground text-xs">{formatDate(company.createdAt)}</td>
+                        <td className="px-5 py-3.5">
+                          <div className="relative flex items-center gap-1 justify-end">
+                            <button onClick={() => setViewTarget(company)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"><Eye size={15} /></button>
+                            <button onClick={() => setMenuOpen(menuOpen === company._id ? null : company._id)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"><MoreHorizontal size={15} /></button>
+                            {menuOpen === company._id && (
+                              <div className="absolute right-0 top-8 z-20 bg-card border border-border rounded-xl shadow-lg py-1 min-w-[160px]">
+                                <button onClick={() => openEdit(company)} className="flex items-center gap-2 w-full px-4 py-2 text-sm hover:bg-muted text-foreground"><Edit2 size={14} />Edit</button>
+                                <button onClick={() => toggleStatus(company)} className="flex items-center gap-2 w-full px-4 py-2 text-sm hover:bg-muted text-foreground">
+                                  {company.status === 'active' ? <><XCircle size={14} />Suspend</> : <><CheckCircle size={14} />Activate</>}
+                                </button>
+                                <button onClick={() => handleDelete(company._id)} className="flex items-center gap-2 w-full px-4 py-2 text-sm hover:bg-muted text-destructive"><Trash2 size={14} />Delete</button>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
           {/* Pagination */}
           <div className="flex items-center justify-between px-5 py-3 border-t border-border">
-            <p className="text-xs text-muted-foreground">{filtered.length} companies</p>
+            <p className="text-xs text-muted-foreground">{total} companies</p>
             <div className="flex items-center gap-2">
               <button disabled={page === 1} onClick={() => setPage((p) => p - 1)} className="p-1.5 rounded-lg border border-border disabled:opacity-40 hover:bg-muted transition-colors"><ChevronLeft size={14} /></button>
               <span className="text-xs font-600">{page} / {totalPages}</span>
@@ -236,6 +365,12 @@ export default function CompaniesPage() {
               <button onClick={() => setModalOpen(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X size={16} /></button>
             </div>
             <div className="px-6 py-5 space-y-4">
+              {saveError && (
+                <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{saveError}</span>
+                </div>
+              )}
               {[
                 { label: 'Company Name', key: 'name', placeholder: 'e.g. Meridian Logistics' },
                 { label: 'Contact Person', key: 'contact', placeholder: 'Full name' },
@@ -256,15 +391,27 @@ export default function CompaniesPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-600 text-muted-foreground mb-1.5">Status</label>
-                  <select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as Company['status'] }))} className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30">
+                  <select
+                    value={form.status}
+                    onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as ApiCompany['status'] }))}
+                    disabled={!!editTarget}
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                  >
                     <option value="active">Active</option>
                     <option value="pending">Pending</option>
                     <option value="suspended">Suspended</option>
                   </select>
+                  {editTarget && (
+                    <p className="text-[10px] text-muted-foreground mt-1">Use the row menu's Activate/Suspend to change status.</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-600 text-muted-foreground mb-1.5">Plan</label>
-                  <select value={form.plan} onChange={(e) => setForm((f) => ({ ...f, plan: e.target.value }))} className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30">
+                  <select
+                    value={form.plan}
+                    onChange={(e) => setForm((f) => ({ ...f, plan: e.target.value as ApiCompany['plan'] }))}
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  >
                     <option>Starter</option>
                     <option>Business</option>
                     <option>Enterprise</option>
@@ -273,8 +420,15 @@ export default function CompaniesPage() {
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border">
-              <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm font-600 text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
-              <button onClick={handleSave} className="px-5 py-2 text-sm font-600 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">{editTarget ? 'Save Changes' : 'Add Company'}</button>
+              <button onClick={() => setModalOpen(false)} disabled={saving} className="px-4 py-2 text-sm font-600 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">Cancel</button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-2 px-5 py-2 text-sm font-600 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-60"
+              >
+                {saving && <Loader2 size={14} className="animate-spin" />}
+                {saving ? 'Saving…' : editTarget ? 'Save Changes' : 'Add Company'}
+              </button>
             </div>
           </div>
         </div>
@@ -303,11 +457,10 @@ export default function CompaniesPage() {
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { icon: <Mail size={14} />, label: 'Email', value: viewTarget.email },
-                  { icon: <Phone size={14} />, label: 'Phone', value: viewTarget.phone },
-                  { icon: <MapPin size={14} />, label: 'Address', value: viewTarget.address },
+                  { icon: <Phone size={14} />, label: 'Phone', value: viewTarget.phone || '—' },
+                  { icon: <MapPin size={14} />, label: 'Address', value: viewTarget.address || '—' },
                   { icon: <Building2 size={14} />, label: 'Plan', value: viewTarget.plan },
-                  { icon: <CheckCircle size={14} />, label: 'Shipments', value: viewTarget.shipments.toLocaleString() },
-                  { icon: <Clock size={14} />, label: 'Joined', value: viewTarget.joinedAt },
+                  { icon: <Clock size={14} />, label: 'Joined', value: formatDate(viewTarget.createdAt) },
                 ].map(({ icon, label, value }) => (
                   <div key={label} className="bg-muted/40 rounded-lg p-3">
                     <div className="flex items-center gap-1.5 text-muted-foreground mb-1">{icon}<span className="text-xs">{label}</span></div>
@@ -320,7 +473,6 @@ export default function CompaniesPage() {
         </div>
       )}
 
-      {/* Backdrop for menu close */}
       {menuOpen && <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(null)} />}
     </AppLayout>
   );

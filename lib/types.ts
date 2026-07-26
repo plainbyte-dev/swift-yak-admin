@@ -14,6 +14,57 @@ export interface ApiCourier {
   deliveriesLeft?: number;
 }
 
+export interface VolumeDataPoint {
+  day: string;           // 'Mon', 'Tue', ... or ISO date for longer ranges
+  shipments: number;
+  delivered: number;
+  failed: number;
+}
+
+export interface CompanyPerformance {
+  companyId: string;
+  company: string;
+  shipments: number;
+  onTime: number;        // percentage, e.g. 94
+  revenue: number;        // raw number — format with toLocaleString in the UI, not the API
+}
+
+export interface CourierPerformance {
+  courierId: string;
+  name: string;
+  deliveries: number;
+  onTime: number;
+  rating: number;
+}
+
+export interface ReportsSummary {
+  totalShipments: number;
+  totalShipmentsChangePct: number;
+  delivered: number;
+  deliveredChangePct: number;
+  onTimeRate: number;
+  onTimeRateChangePct: number;
+  failedOrCancelled: number;
+  failedChangePct: number;
+  activeCouriers: number;
+  activeCouriersChange: number;
+  partnerCompanies: number;
+  partnerCompaniesChange: number;
+}
+
+export type ReportPeriod = 'week' | 'month' | 'quarter' | 'year';
+
+export interface ApiUser {
+  _id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'dispatcher' | 'viewer';
+  company: string;
+  isActive: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
 export interface ApiShipment {
   _id: string;
   trackingNumber: string;
@@ -55,4 +106,17 @@ export interface Paginated<T> {
     perPage: number;
     totalPages: number;
   };
+}
+
+export interface ApiCompany {
+  _id: string;
+  name: string;
+  contact: string;
+  email: string;
+  phone?: string;
+  address?: string;
+  status: 'active' | 'pending' | 'suspended';
+  plan: 'Starter' | 'Business' | 'Enterprise';
+  createdAt: string;
+  updatedAt: string;
 }

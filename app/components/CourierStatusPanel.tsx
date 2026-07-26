@@ -1,7 +1,10 @@
-import React from 'react';
+'use client';
+
+import React, { useEffect, useState } from 'react';
 import { MapPin, Clock, AlertCircle } from 'lucide-react';
 import { CourierStatusBadge } from '@/components/ui/StatusBadge';
 import { getCouriers, ApiError } from '@/lib/api';
+import type { ApiCourier } from '@/lib/types';
 
 function minutesAgo(iso: string) {
   return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -14,23 +17,59 @@ function formatAgo(mins: number) {
   return `${h}h ago`;
 }
 
-export default async function CourierStatusPanel() {
-  let couriers: Awaited<ReturnType<typeof getCouriers>>['data'] = [];
-  let errorMessage: string | null = null;
+function CourierStatusSkeleton() {
+  return (
+    <div className="flex flex-col gap-2.5 flex-1">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={`skeleton-${i}`} className="rounded-lg border border-border p-3 animate-pulse">
+          <div className="flex items-start gap-3">
+            <div className="h-8 w-8 rounded-full bg-muted shrink-0" />
+            <div className="flex-1 min-w-0 space-y-2">
+              <div className="h-3 w-2/3 bg-muted rounded" />
+              <div className="h-2.5 w-1/2 bg-muted rounded" />
+              <div className="h-2.5 w-1/3 bg-muted rounded" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
-  try {
-    const res = await getCouriers();
-    couriers = res.data;
-  } catch (err) {
-    errorMessage = err instanceof ApiError ? err.message : 'Could not reach the CourierDesk API';
-  }
+export default function CourierStatusPanel() {
+  const [couriers, setCouriers] = useState<ApiCourier[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getCouriers()
+      .then((res) => {
+        if (!cancelled) setCouriers(res.data);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setErrorMessage(err instanceof ApiError ? err.message : 'Could not reach the CourierDesk API');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="card-elevated p-5 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-base font-700 text-foreground">Courier Status</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">Live · {couriers.length} total</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {loading ? 'Live · loading…' : `Live · ${couriers.length} total`}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
@@ -40,7 +79,9 @@ export default async function CourierStatusPanel() {
         </div>
       </div>
 
-      {errorMessage ? (
+      {loading ? (
+        <CourierStatusSkeleton />
+      ) : errorMessage ? (
         <p className="text-xs text-danger">{errorMessage}</p>
       ) : (
         <div className="flex flex-col gap-2.5 flex-1 overflow-y-auto">
