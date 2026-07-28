@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { Plus, Search, Eye, ChevronLeft, ChevronRight, MapPin, User, ArrowRight, ChevronDown, AlertCircle } from 'lucide-react';
+import { Plus, Search, Eye, ChevronLeft, ChevronRight, MapPin, User, ArrowRight, ChevronDown, AlertCircle, Printer, ArrowLeft, ScanLine } from 'lucide-react';
 import { ShipmentStatusBadge, ShipmentStatus } from '@/components/ui/StatusBadge';
 import {
   getShipments,
@@ -14,6 +14,8 @@ import {
 } from '@/lib/api';
 import type { ApiShipment, ApiCourier } from '@/lib/types';
 import NewShipmentModal from '@/app/components/NewShipmentModal';
+import ShipmentLabel, { ShipmentLabelData } from '@/app/components/ShipmentLabel';
+import BarcodeScannerModal from '@/app/components/BarCodeScannerModal';
 
 const STATUS_TRANSITIONS: Record<ShipmentStatus, ShipmentStatus[]> = {
   pending: ['assigned', 'cancelled'],
@@ -35,6 +37,38 @@ const STATUS_FILTERS: { key: ShipmentStatus | 'all'; label: string; color: strin
 
 const PER_PAGE = 8;
 
+// Builds label data from an ApiShipment. Several fields (pieces, declared
+// value, content type, country codes, sender name/phone) aren't on
+// ApiShipment yet — they fall back to placeholders below until the backend
+// stores and returns them. Search "TODO: backend field" to find each one.
+function toLabelData(shipment: ApiShipment): ShipmentLabelData {
+  const s = shipment as any; // fields not yet in the ApiShipment type
+  return {
+    trackingNumber: shipment.trackingNumber,
+    originCountry: s.originCountry ?? shipment.origin.split(',').pop()?.trim().slice(0, 3).toUpperCase() ?? '—', // TODO: backend field
+    destinationCountry: s.destinationCountry ?? shipment.destination.split(',').pop()?.trim().slice(0, 3).toUpperCase() ?? '—', // TODO: backend field
+    pieces: s.pieces ?? 1, // TODO: backend field
+    actualWeightKg: shipment.weightKg,
+    volumetricWeightKg: s.volumetricWeightKg ?? shipment.weightKg, // TODO: backend field
+    declaredValueUsd: s.declaredValueUsd ?? 0, // TODO: backend field
+    contentType: s.contentType ?? 'Non-Doc', // TODO: backend field
+    description: shipment.notes || '—',
+    sender: {
+      name: s.senderName ?? 'Sender', // TODO: backend field
+      addressLines: [shipment.origin],
+      phone: s.senderPhone ?? '', // TODO: backend field
+    },
+    receiver: {
+      name: shipment.recipient,
+      address: shipment.destination,
+      city: '',
+      country: s.destCountryName ?? '', // TODO: backend field
+      phone: shipment.phone ?? '',
+    },
+    orderCreationDate: new Date(shipment.createdAt).toLocaleDateString('en-US'),
+  };
+}
+
 export default function ShipmentsPage() {
   const [shipments, setShipments] = useState<ApiShipment[]>([]);
   const [total, setTotal] = useState(0);
@@ -51,8 +85,10 @@ export default function ShipmentsPage() {
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   const [viewTarget, setViewTarget] = useState<ApiShipment | null>(null);
+  const [showLabel, setShowLabel] = useState(false);
   const [assignOpen, setAssignOpen] = useState<string | null>(null);
   const [statusOpen, setStatusOpen] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -92,6 +128,13 @@ export default function ShipmentsPage() {
     setSearch(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => setPage(1), 400);
+  }
+
+  // ── Handle a barcode scan: fill search with the decoded tracking # ──────
+  function handleScan(value: string) {
+    setScannerOpen(false);
+    setSearch(value);
+    setPage(1);
   }
 
   // ── Fetch couriers once, for the assign dropdown ─────────────────────────
@@ -155,6 +198,16 @@ export default function ShipmentsPage() {
     }
   }
 
+  function openDetail(shipment: ApiShipment) {
+    setViewTarget(shipment);
+    setShowLabel(false);
+  }
+
+  function closeDetail() {
+    setViewTarget(null);
+    setShowLabel(false);
+  }
+
   return (
     <AppLayout activePath="/shipments">
       <div className="max-w-screen-xl mx-auto space-y-6">
@@ -197,15 +250,23 @@ export default function ShipmentsPage() {
           ))}
         </div>
 
-        {/* Search */}
-        <div className="relative max-w-sm">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={search}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Search by tracking #, recipient, courier..."
-            className="w-full pl-9 pr-4 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
+        {/* Search + Scan */}
+        <div className="flex items-center gap-2 max-w-sm">
+          <div className="relative flex-1">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder="Search by tracking #, recipient, courier..."
+              className="w-full pl-9 pr-4 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          <button
+            onClick={() => setScannerOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-600 bg-card border border-border rounded-lg hover:bg-muted transition-colors shrink-0"
+          >
+            <ScanLine size={14} /> Scan
+          </button>
         </div>
 
         {/* Table */}
@@ -326,9 +387,18 @@ export default function ShipmentsPage() {
                           {shipment.eta ? new Date(shipment.eta).toLocaleString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'Unassigned'}
                         </td>
                         <td className="px-5 py-3.5">
-                          <button onClick={() => setViewTarget(shipment)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                            <Eye size={15} />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => openDetail(shipment)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" aria-label="View details">
+                              <Eye size={15} />
+                            </button>
+                            <button
+                              onClick={() => { setViewTarget(shipment); setShowLabel(true); }}
+                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                              aria-label="Print label"
+                            >
+                              <Printer size={15} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -359,77 +429,108 @@ export default function ShipmentsPage() {
         onCreated={handleShipmentCreated}
       />
 
-      {/* Detail Modal */}
+      {/* Barcode Scanner Modal */}
+      <BarcodeScannerModal
+        open={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onScan={handleScan}
+      />
+
+      {/* Detail / Label Modal */}
       {viewTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-card border border-border rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card">
-              <div>
-                <h2 className="text-base font-700 text-foreground">{viewTarget.trackingNumber}</h2>
-                <p className="text-xs text-muted-foreground">
-                  {new Date(viewTarget.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                </p>
-              </div>
-              <button onClick={() => setViewTarget(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">✕</button>
-            </div>
-            <div className="px-6 py-5 space-y-5">
-              <div className="flex items-center justify-between">
-                <ShipmentStatusBadge status={viewTarget.status} />
-                <span className="text-xs text-muted-foreground">{viewTarget.weightKg} kg</span>
-              </div>
-              <div className="bg-muted/40 rounded-xl p-4 space-y-3">
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 h-2 w-2 rounded-full bg-primary shrink-0" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Pickup</p>
-                    <p className="text-sm font-600 text-foreground">{viewTarget.origin}</p>
-                  </div>
-                </div>
-                <div className="ml-[3px] h-6 w-px bg-border" />
-                <div className="flex items-start gap-3">
-                  <MapPin size={14} className="mt-0.5 text-success shrink-0" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Delivery</p>
-                    <p className="text-sm font-600 text-foreground">{viewTarget.destination}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: 'Recipient', value: viewTarget.recipient },
-                  { label: 'Phone', value: viewTarget.phone || '—' },
-                  { label: 'Courier', value: viewTarget.courier?.name || 'Unassigned' },
-                  { label: 'ETA', value: viewTarget.eta ? new Date(viewTarget.eta).toLocaleString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—' },
-                ].map(({ label, value }) => (
-                  <div key={label} className="bg-muted/40 rounded-lg p-3">
-                    <p className="text-xs text-muted-foreground mb-1">{label}</p>
-                    <p className="text-sm font-600 text-foreground">{value}</p>
-                  </div>
-                ))}
-              </div>
-              {viewTarget.notes && (
-                <div className="bg-muted/40 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground mb-1">Notes</p>
-                  <p className="text-sm text-foreground">{viewTarget.notes}</p>
-                </div>
-              )}
-              {STATUS_TRANSITIONS[viewTarget.status].length > 0 && (
+          <div className={`bg-card border border-border rounded-2xl shadow-xl w-full ${showLabel ? 'max-w-3xl' : 'max-w-md'} max-h-[90vh] overflow-y-auto`}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card no-print">
+              <div className="flex items-center gap-2">
+                {showLabel && (
+                  <button onClick={() => setShowLabel(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground" aria-label="Back to details">
+                    <ArrowLeft size={16} />
+                  </button>
+                )}
                 <div>
-                  <p className="text-xs font-600 text-muted-foreground mb-2">Update Status</p>
-                  <div className="flex flex-wrap gap-2">
-                    {STATUS_TRANSITIONS[viewTarget.status].map((t) => (
-                      <button
-                        key={t}
-                        onClick={() => handleStatusUpdate(viewTarget._id, t)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-600 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-colors capitalize"
-                      >
-                        <ArrowRight size={11} />{t.replace('_', ' ')}
-                      </button>
-                    ))}
+                  <h2 className="text-base font-700 text-foreground">{viewTarget.trackingNumber}</h2>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(viewTarget.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                {!showLabel && (
+                  <button
+                    onClick={() => setShowLabel(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-600 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-colors"
+                  >
+                    <Printer size={13} /> View Label
+                  </button>
+                )}
+                <button onClick={closeDetail} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">✕</button>
+              </div>
+            </div>
+
+            {showLabel ? (
+              <div className="px-6 py-5">
+                <ShipmentLabel data={toLabelData(viewTarget)} />
+              </div>
+            ) : (
+              <div className="px-6 py-5 space-y-5">
+                <div className="flex items-center justify-between">
+                  <ShipmentStatusBadge status={viewTarget.status} />
+                  <span className="text-xs text-muted-foreground">{viewTarget.weightKg} kg</span>
+                </div>
+                <div className="bg-muted/40 rounded-xl p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 h-2 w-2 rounded-full bg-primary shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Pickup</p>
+                      <p className="text-sm font-600 text-foreground">{viewTarget.origin}</p>
+                    </div>
+                  </div>
+                  <div className="ml-[3px] h-6 w-px bg-border" />
+                  <div className="flex items-start gap-3">
+                    <MapPin size={14} className="mt-0.5 text-success shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Delivery</p>
+                      <p className="text-sm font-600 text-foreground">{viewTarget.destination}</p>
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Recipient', value: viewTarget.recipient },
+                    { label: 'Phone', value: viewTarget.phone || '—' },
+                    { label: 'Courier', value: viewTarget.courier?.name || 'Unassigned' },
+                    { label: 'ETA', value: viewTarget.eta ? new Date(viewTarget.eta).toLocaleString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—' },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="bg-muted/40 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">{label}</p>
+                      <p className="text-sm font-600 text-foreground">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                {viewTarget.notes && (
+                  <div className="bg-muted/40 rounded-lg p-3">
+                    <p className="text-xs text-muted-foreground mb-1">Notes</p>
+                    <p className="text-sm text-foreground">{viewTarget.notes}</p>
+                  </div>
+                )}
+                {STATUS_TRANSITIONS[viewTarget.status].length > 0 && (
+                  <div>
+                    <p className="text-xs font-600 text-muted-foreground mb-2">Update Status</p>
+                    <div className="flex flex-wrap gap-2">
+                      {STATUS_TRANSITIONS[viewTarget.status].map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => handleStatusUpdate(viewTarget._id, t)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-600 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-colors capitalize"
+                        >
+                          <ArrowRight size={11} />{t.replace('_', ' ')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

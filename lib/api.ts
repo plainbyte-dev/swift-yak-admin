@@ -5,7 +5,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 const TOKEN_KEY = 'cd_token';
 
 
- 
+
 // NEW: add alongside getMe
 export function updateMe(data: Partial<{
   name: string;
@@ -23,14 +23,14 @@ export function updateMe(data: Partial<{
     body: JSON.stringify(data),
   });
 }
- 
+
 export function changePassword(data: { currentPassword: string; newPassword: string }) {
   return request<{ success: boolean; message: string }>('/auth/change-password', {
     method: 'PATCH',
     body: JSON.stringify(data),
   });
 }
- 
+
 export function getReportsSummary(period: ReportPeriod) {
   return request<{ data: ReportsSummary }>(`/reports/summary?period=${period}`);
 }
@@ -296,6 +296,13 @@ export function createShipment(data: {
   phone?: string;
   notes?: string;
   eta?: string;
+  // Fields needed for the printable shipping label
+  pieces?: number;
+  volumetricWeightKg?: number;
+  declaredValueUsd?: number;
+  contentType?: string;
+  originCountry?: string;
+  destinationCountry?: string;
 }) {
   return request<{ data: ApiShipment }>('/shipments', {
     method: 'POST',
@@ -311,6 +318,12 @@ export function updateShipment(id: string, data: Partial<{
   phone?: string;
   notes?: string;
   eta?: string;
+  pieces?: number;
+  volumetricWeightKg?: number;
+  declaredValueUsd?: number;
+  contentType?: string;
+  originCountry?: string;
+  destinationCountry?: string;
 }>) {
   return request<{ data: ApiShipment }>(`/shipments/${id}`, {
     method: 'PATCH',
