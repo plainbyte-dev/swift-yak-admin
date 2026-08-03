@@ -93,8 +93,7 @@ export default function DashboardHeader() {
     }
   }
 
-  function handleShipmentCreated(shipment: ApiShipment) {
-    console.log('Shipment created:', shipment);
+  function handleShipmentCreated(_shipment: ApiShipment) {
     router.refresh();
   }
 

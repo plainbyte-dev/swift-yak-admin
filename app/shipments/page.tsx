@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import AppLayout from '@/components/AppLayout';
 import { Plus, Search, Eye, ChevronLeft, ChevronRight, MapPin, User, ArrowRight, ChevronDown, AlertCircle, Printer, ArrowLeft, ScanLine } from 'lucide-react';
 import { ShipmentStatusBadge, ShipmentStatus } from '@/components/ui/StatusBadge';
@@ -92,8 +93,36 @@ export default function ShipmentsPage() {
   const [assignOpen, setAssignOpen] = useState<string | null>(null);
   const [statusOpen, setStatusOpen] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Dropdowns are rendered in a portal (see below) so they always drop
+  // downward from the trigger and are never clipped by the table's scroll
+  // container, even for rows near the bottom of the list.
+  function openMenu(e: React.MouseEvent<HTMLButtonElement>, id: string, current: string | null, setOpen: (id: string | null) => void) {
+    if (current === id) {
+      setOpen(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenuPos({ top: rect.bottom + 4, left: rect.left });
+    setOpen(id);
+  }
+
+  useEffect(() => {
+    if (!assignOpen && !statusOpen) return;
+    function close() {
+      setAssignOpen(null);
+      setStatusOpen(null);
+    }
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [assignOpen, statusOpen]);
 
   // ── Fetch shipments (search/status/page-aware) ──────────────────────────
   const fetchShipments = useCallback(async () => {
@@ -326,7 +355,7 @@ export default function ShipmentsPage() {
                         <td className="px-5 py-3.5">
                           <div className="relative">
                             <button
-                              onClick={() => setAssignOpen(assignOpen === shipment._id ? null : shipment._id)}
+                              onClick={(e) => openMenu(e, shipment._id, assignOpen, setAssignOpen)}
                               className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
                                 shipment.courier ? 'border-border text-foreground hover:bg-muted' : 'border-dashed border-warning text-warning hover:bg-warning/5'
                               }`}
@@ -335,8 +364,11 @@ export default function ShipmentsPage() {
                               <span>{shipment.courier?.name || 'Assign'}</span>
                               <ChevronDown size={10} />
                             </button>
-                            {assignOpen === shipment._id && (
-                              <div className="absolute left-0 top-9 z-20 bg-card border border-border rounded-xl shadow-lg py-1 min-w-[180px]">
+                            {assignOpen === shipment._id && menuPos && createPortal(
+                              <div
+                                style={{ top: menuPos.top, left: menuPos.left }}
+                                className="fixed z-20 bg-card border border-border rounded-xl shadow-lg py-1 min-w-[180px]"
+                              >
                                 {couriers.length === 0 ? (
                                   <p className="px-4 py-2 text-xs text-muted-foreground">No couriers available</p>
                                 ) : (
@@ -359,27 +391,32 @@ export default function ShipmentsPage() {
                                     </button>
                                   ))
                                 )}
-                              </div>
+                              </div>,
+                              document.body
                             )}
                           </div>
                         </td>
                         <td className="px-5 py-3.5">
                           <div className="relative">
                             {transitions.length > 0 ? (
-                              <button onClick={() => setStatusOpen(statusOpen === shipment._id ? null : shipment._id)} className="group">
+                              <button onClick={(e) => openMenu(e, shipment._id, statusOpen, setStatusOpen)} className="group">
                                 <ShipmentStatusBadge status={shipment.status} />
                               </button>
                             ) : (
                               <ShipmentStatusBadge status={shipment.status} />
                             )}
-                            {statusOpen === shipment._id && transitions.length > 0 && (
-                              <div className="absolute left-0 top-8 z-20 bg-card border border-border rounded-xl shadow-lg py-1 min-w-[160px]">
+                            {statusOpen === shipment._id && transitions.length > 0 && menuPos && createPortal(
+                              <div
+                                style={{ top: menuPos.top, left: menuPos.left }}
+                                className="fixed z-20 bg-card border border-border rounded-xl shadow-lg py-1 min-w-[160px]"
+                              >
                                 {transitions.map((t) => (
                                   <button key={t} onClick={() => handleStatusUpdate(shipment._id, t)} className="flex items-center gap-2 w-full px-4 py-2 text-xs hover:bg-muted text-foreground">
                                     <ArrowRight size={11} /><span className="capitalize">{t.replace('_', ' ')}</span>
                                   </button>
                                 ))}
-                              </div>
+                              </div>,
+                              document.body
                             )}
                           </div>
                         </td>

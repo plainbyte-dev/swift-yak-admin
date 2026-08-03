@@ -1,15 +1,24 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { getShipments, ApiError } from '@/lib/api';
+import type { ShipmentStatus } from '@/components/ui/StatusBadge';
 
-const STATUS_DATA = [
-  { name: 'Delivered', value: 1621, color: 'var(--positive)' },
-  { name: 'In Transit', value: 89, color: 'var(--primary)' },
-  { name: 'Assigned', value: 43, color: 'var(--info)' },
-  { name: 'Pending', value: 14, color: 'var(--accent)' },
-  { name: 'Failed', value: 52, color: 'var(--danger)' },
-  { name: 'Cancelled', value: 23, color: 'var(--muted-foreground)' },
+interface StatusSlice {
+  name: string;
+  value: number;
+  color: string;
+}
+
+const STATUS_QUERY: Array<{ status: ShipmentStatus; name: string; color: string }> = [
+  { status: 'delivered', name: 'Delivered', color: 'var(--positive)' },
+  { status: 'in_transit', name: 'In Transit', color: 'var(--primary)' },
+  { status: 'picked_up', name: 'Picked Up', color: 'var(--info)' },
+  { status: 'assigned', name: 'Assigned', color: 'var(--info)' },
+  { status: 'pending', name: 'Pending', color: 'var(--accent)' },
+  { status: 'failed', name: 'Failed', color: 'var(--danger)' },
+  { status: 'cancelled', name: 'Cancelled', color: 'var(--muted-foreground)' },
 ];
 
 const CustomTooltip = ({ active, payload }: {
@@ -18,31 +27,80 @@ const CustomTooltip = ({ active, payload }: {
 }) => {
   if (!active || !payload?.length) return null;
   const item = payload[0];
-  const total = STATUS_DATA.reduce((s, d) => s + d.value, 0);
   return (
     <div className="card-elevated p-3 text-xs shadow-card-md">
       <div className="flex items-center gap-2 mb-1">
         <span className="h-2 w-2 rounded-full inline-block" style={{ backgroundColor: item.payload.color }} />
         <span className="font-600 text-foreground">{item.name}</span>
       </div>
-      <p className="text-muted-foreground font-tabular">
-        {item.value} shipments ({((item.value / total) * 100).toFixed(1)}%)
-      </p>
+      <p className="text-muted-foreground font-tabular">{item.value} shipments</p>
     </div>
   );
 };
 
+function ChartSkeleton() {
+  return (
+    <div className="card-elevated p-5">
+      <div className="h-4 w-32 bg-muted rounded animate-pulse mb-2" />
+      <div className="h-3 w-24 bg-muted rounded animate-pulse mb-4" />
+      <div className="h-[180px] w-full bg-muted rounded animate-pulse" />
+    </div>
+  );
+}
+
 export default function DeliveryOutcomeChartInner() {
+  const [data, setData] = useState<StatusSlice[] | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all(
+      STATUS_QUERY.map(({ status }) => getShipments({ status, perPage: 1 }))
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const slices = STATUS_QUERY
+          .map(({ name, color }, i) => ({ name, color, value: results[i].pagination.total }))
+          .filter((slice) => slice.value > 0);
+        setData(slices);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setErrorMessage(err instanceof ApiError ? err.message : 'Could not reach the CourierDesk API');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) return <ChartSkeleton />;
+
+  if (errorMessage || !data || data.length === 0) {
+    return (
+      <div className="card-elevated p-5">
+        <h2 className="text-sm font-700 text-foreground mb-1">Status Distribution</h2>
+        <p className="text-xs text-danger">{errorMessage ?? 'No shipments yet'}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="card-elevated p-5">
       <div className="mb-3">
         <h2 className="text-sm font-700 text-foreground">Status Distribution</h2>
-        <p className="text-xs text-muted-foreground mt-0.5">All shipments this week</p>
+        <p className="text-xs text-muted-foreground mt-0.5">All shipments</p>
       </div>
       <ResponsiveContainer width="100%" height={180}>
         <PieChart>
           <Pie
-            data={STATUS_DATA}
+            data={data}
             cx="50%"
             cy="50%"
             innerRadius={45}
@@ -51,7 +109,7 @@ export default function DeliveryOutcomeChartInner() {
             dataKey="value"
             strokeWidth={0}
           >
-            {STATUS_DATA.map((entry, index) => (
+            {data.map((entry, index) => (
               <Cell key={`cell-${index}`} fill={entry.color} />
             ))}
           </Pie>

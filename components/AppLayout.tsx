@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
+import { isAuthenticated } from '@/lib/api';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -9,7 +11,24 @@ interface AppLayoutProps {
 }
 
 export default function AppLayout({ children, activePath }: AppLayoutProps) {
+  const router = useRouter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      router.replace('/login');
+      return;
+    }
+    // The token only exists in localStorage, so this check can only run client-side
+    // after mount — there is no way to gate the initial server render on it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setChecked(true);
+  }, [router]);
+
+  if (!checked) {
+    return <div className="h-screen bg-background" />;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

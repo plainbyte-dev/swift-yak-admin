@@ -14,8 +14,6 @@ export interface ApiCourier {
   deliveriesLeft?: number;
 }
 
-// Add to lib/types.ts:
-
 export interface NotificationPreferences {
   newShipment: boolean;
   statusUpdate: boolean;
@@ -24,7 +22,6 @@ export interface NotificationPreferences {
   smsAlerts: boolean;
 }
 
-// Extend the existing ApiUser interface with these fields:
 export interface ApiUser {
   _id: string;
   name: string;
@@ -84,17 +81,6 @@ export interface ReportsSummary {
 }
 
 export type ReportPeriod = 'week' | 'month' | 'quarter' | 'year';
-
-export interface ApiUser {
-  _id: string;
-  name: string;
-  email: string;
-  role: 'admin' | 'dispatcher' | 'viewer';
-  company: string;
-  isActive: boolean;
-  lastLoginAt: string | null;
-  createdAt: string;
-}
 
 export interface ApiShipment {
   _id: string;

@@ -1,12 +1,10 @@
 import type { ApiCourier, ApiShipment, DashboardMetrics, ApiUser, Paginated, ApiCompany, ReportPeriod, CourierPerformance, VolumeDataPoint, CompanyPerformance, ReportsSummary } from './types';
 import type { ShipmentStatus, CourierStatus } from '@/components/ui/StatusBadge';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+import { API_BASE } from './env';
+
 const TOKEN_KEY = 'cd_token';
 
-
-
-// NEW: add alongside getMe
 export function updateMe(data: Partial<{
   name: string;
   phone: string;
@@ -165,6 +163,15 @@ interface RequestOptions extends RequestInit {
   cache?: RequestCache;
 }
 
+const PUBLIC_PATHS = ['/login', '/register'];
+
+function handleUnauthorized() {
+  window.localStorage.removeItem(TOKEN_KEY);
+  if (!PUBLIC_PATHS.includes(window.location.pathname)) {
+    window.location.href = '/login';
+  }
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = typeof window !== 'undefined' ? window.localStorage.getItem(TOKEN_KEY) : null;
 
@@ -186,10 +193,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   if (!res.ok) {
-    // Token expired/invalid — clear it so the app can redirect to login rather than
+    // Token expired/invalid — clear it and bounce to login rather than
     // keep firing requests with a dead token.
     if (res.status === 401 && typeof window !== 'undefined' && path !== '/auth/login') {
-      window.localStorage.removeItem(TOKEN_KEY);
+      handleUnauthorized();
     }
     throw new ApiError(res.status, body?.message || `Request to ${path} failed with ${res.status}`);
   }
@@ -430,7 +437,7 @@ export async function uploadAvatar(file: File) {
 
   if (!res.ok) {
     if (res.status === 401 && typeof window !== 'undefined') {
-      window.localStorage.removeItem(TOKEN_KEY);
+      handleUnauthorized();
     }
     throw new ApiError(res.status, body?.message || `Avatar upload failed with ${res.status}`);
   }
