@@ -66,6 +66,18 @@ interface FormState {
 
   specialInstructions: string;
   acceptedTerms: boolean;
+
+  // Freight / customs manifest details — optional, usually filled in once
+  // flight/consolidation details are known.
+  masterBill: string;
+  flightNo: string;
+  airlineCode: string;
+  iataLoadPort: string;
+  iataDestPort: string;
+  portDestination: string;
+  currencyCode: string;
+  descriptionOfGoods: string;
+  remarks: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -104,6 +116,16 @@ const EMPTY_FORM: FormState = {
 
   specialInstructions: '',
   acceptedTerms: false,
+
+  masterBill: '',
+  flightNo: '',
+  airlineCode: '',
+  iataLoadPort: '',
+  iataDestPort: '',
+  portDestination: '',
+  currencyCode: 'USD',
+  descriptionOfGoods: '',
+  remarks: '',
 };
 
 function formatAddress(f: {
@@ -196,19 +218,52 @@ export default function NewShipmentModal({ open, onClose, onCreated }: NewShipme
           form.rateCard && `Rate card: ${form.rateCard}`,
           form.specialInstructions,
         ].filter(Boolean).join(' — ') || undefined,
-        pieces: Number(form.quantity) || 1,
-        volumetricWeightKg,
-        declaredValueUsd: Number(form.declaredValue) || 0,
-        contentType: form.contentType,
-        originCountry: form.pickupCountry,
-        destinationCountry: form.destCountry,
+        sender: {
+          name: `${form.pickupFirstName} ${form.pickupLastName}`.trim() || undefined,
+          email: form.pickupEmail || undefined,
+          phone: form.pickupPhone || undefined,
+          address1: form.pickupAddress1 || undefined,
+          address2: form.pickupAddress2 || undefined,
+          city: form.pickupSuburb || undefined,
+          state: form.pickupState || undefined,
+          postcode: form.pickupPostcode || undefined,
+          country: form.pickupCountry || undefined,
+          countryCode: countryCode(form.pickupCountry),
+        },
+        consignee: {
+          name: `${form.destFirstName} ${form.destLastName}`.trim() || undefined,
+          company: form.destCompany || undefined,
+          email: form.destEmail || undefined,
+          phone: form.destPhone || undefined,
+          address1: form.destAddress1 || undefined,
+          address2: form.destAddress2 || undefined,
+          city: form.destSuburb || undefined,
+          state: form.destState || undefined,
+          postcode: form.destPostcode || undefined,
+          country: form.destCountry || undefined,
+          countryCode: countryCode(form.destCountry),
+        },
+        freight: {
+          masterBill: form.masterBill || undefined,
+          flightNo: form.flightNo || undefined,
+          airlineCode: form.airlineCode || undefined,
+          iataLoadPort: form.iataLoadPort || undefined,
+          iataDestPort: form.iataDestPort || undefined,
+          portDestination: form.portDestination || undefined,
+          pieces: Number(form.quantity) || 1,
+          volumetricWeightKg,
+          declaredValueUsd: Number(form.declaredValue) || 0,
+          currencyCode: form.currencyCode || 'USD',
+          contentType: form.contentType,
+          descriptionOfGoods: form.descriptionOfGoods || undefined,
+          remarks: form.remarks || undefined,
+        },
       });
 
       onCreated?.(data);
 
       setLabelData({
-        // Real tracking number returned by the API — no client-side fallback.
-        trackingNumber: (data as any).trackingNumber,
+        trackingNumber: data.trackingNumber,
         originCountry: countryCode(form.pickupCountry),
         destinationCountry: countryCode(form.destCountry),
         pieces: Number(form.quantity) || 1,
@@ -393,6 +448,52 @@ export default function NewShipmentModal({ open, onClose, onCreated }: NewShipme
                       {CONTENT_TYPES.map((c) => <option key={c}>{c}</option>)}
                     </select>
                   </div>
+                </div>
+              </section>
+
+              {/* Freight & Customs Details */}
+              <section className="space-y-3 pt-4 border-t border-border">
+                <div className="flex items-center gap-2 text-sm font-700 text-foreground">
+                  <Globe2 size={15} className="text-muted-foreground" />
+                  Freight &amp; Customs Details
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="form-label">Master Bill</label>
+                    <input className="form-input" value={form.masterBill} onChange={(e) => update('masterBill', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="form-label">Flight No</label>
+                    <input className="form-input" value={form.flightNo} onChange={(e) => update('flightNo', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="form-label">Airline Code</label>
+                    <input className="form-input" value={form.airlineCode} onChange={(e) => update('airlineCode', e.target.value.toUpperCase())} />
+                  </div>
+                  <div>
+                    <label className="form-label">IATA Load Port</label>
+                    <input className="form-input" value={form.iataLoadPort} onChange={(e) => update('iataLoadPort', e.target.value.toUpperCase())} />
+                  </div>
+                  <div>
+                    <label className="form-label">IATA Dest Port</label>
+                    <input className="form-input" value={form.iataDestPort} onChange={(e) => update('iataDestPort', e.target.value.toUpperCase())} />
+                  </div>
+                  <div>
+                    <label className="form-label">Port Destination</label>
+                    <input className="form-input" value={form.portDestination} onChange={(e) => update('portDestination', e.target.value.toUpperCase())} />
+                  </div>
+                  <div>
+                    <label className="form-label">Currency Code</label>
+                    <input className="form-input" value={form.currencyCode} onChange={(e) => update('currencyCode', e.target.value.toUpperCase())} />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="form-label">Description of Goods</label>
+                    <input className="form-input" value={form.descriptionOfGoods} onChange={(e) => update('descriptionOfGoods', e.target.value)} placeholder="e.g. CLOTHES" />
+                  </div>
+                </div>
+                <div>
+                  <label className="form-label">Remarks</label>
+                  <input className="form-input" value={form.remarks} onChange={(e) => update('remarks', e.target.value)} />
                 </div>
               </section>
 

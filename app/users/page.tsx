@@ -5,9 +5,9 @@ import AppLayout from '@/components/AppLayout';
 import {
   MoreHorizontal, Edit2, Trash2, CheckCircle, XCircle, Mail, X,
   ChevronLeft, ChevronRight, Shield, Truck as CourierIcon, Eye, Search,
-  User as UserIcon, Loader2, AlertCircle,
+  User as UserIcon, Loader2, AlertCircle, Plus,
 } from 'lucide-react';
-import { getUsers, updateUser, deleteUser, ApiError, type GetUsersParams } from '@/lib/api';
+import { getUsers, createUser, updateUser, deleteUser, ApiError, type GetUsersParams } from '@/lib/api';
 import type { ApiUser } from '@/lib/types';
 
 const ROLE_CONFIG: Record<ApiUser['role'], { label: string; icon: React.ReactNode; className: string }> = {
@@ -52,6 +52,11 @@ export default function UsersPage() {
   const [form, setForm] = useState({ name: '', role: 'viewer' as ApiUser['role'], company: '' });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', role: 'viewer' as ApiUser['role'], company: '' });
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
 
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [viewTarget, setViewTarget] = useState<ApiUser | null>(null);
@@ -115,6 +120,41 @@ export default function UsersPage() {
     }
   }
 
+  function openAddModal() {
+    setAddForm({ name: '', email: '', password: '', role: 'viewer', company: '' });
+    setAddError(null);
+    setAddModalOpen(true);
+  }
+
+  async function handleAddUser() {
+    if (!addForm.name.trim() || !addForm.email.trim() || !addForm.password) {
+      setAddError('Name, email, and password are required.');
+      return;
+    }
+    if (addForm.password.length < 8) {
+      setAddError('Password must be at least 8 characters.');
+      return;
+    }
+
+    setAdding(true);
+    setAddError(null);
+    try {
+      await createUser({
+        name: addForm.name.trim(),
+        email: addForm.email.trim().toLowerCase(),
+        password: addForm.password,
+        role: addForm.role,
+        company: addForm.company.trim() || undefined,
+      });
+      setAddModalOpen(false);
+      await fetchUsers();
+    } catch (err) {
+      setAddError(err instanceof ApiError ? err.message : 'Failed to create user. Please try again.');
+    } finally {
+      setAdding(false);
+    }
+  }
+
   async function handleDelete(id: string) {
     setActionError(null);
     setMenuOpen(null);
@@ -154,7 +194,13 @@ export default function UsersPage() {
             <h1 className="text-2xl font-700 text-foreground">Users</h1>
             <p className="text-sm text-muted-foreground mt-0.5">Manage account roles and access</p>
           </div>
-          {/* No "Invite User" button — accounts are created via /register; this page manages existing users. */}
+          <button
+            onClick={openAddModal}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-600 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+          >
+            <Plus size={15} />
+            Add User
+          </button>
         </div>
 
         {actionError && (
@@ -296,7 +342,85 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Edit Modal — no create/invite here */}
+      {/* Add User Modal */}
+      {addModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-2xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <h2 className="text-base font-700 text-foreground">Add User</h2>
+              <button onClick={() => setAddModalOpen(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X size={16} /></button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              {addError && (
+                <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{addError}</span>
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-600 text-muted-foreground mb-1.5">Full Name</label>
+                <input
+                  value={addForm.name}
+                  onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-600 text-muted-foreground mb-1.5">Email</label>
+                <input
+                  type="email"
+                  value={addForm.email}
+                  onChange={(e) => setAddForm((f) => ({ ...f, email: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-600 text-muted-foreground mb-1.5">Temporary Password</label>
+                <input
+                  type="password"
+                  value={addForm.password}
+                  onChange={(e) => setAddForm((f) => ({ ...f, password: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">At least 8 characters. Share this with the user so they can log in and change it.</p>
+              </div>
+              <div>
+                <label className="block text-xs font-600 text-muted-foreground mb-1.5">Company</label>
+                <input
+                  value={addForm.company}
+                  onChange={(e) => setAddForm((f) => ({ ...f, company: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-600 text-muted-foreground mb-1.5">Role</label>
+                <select
+                  value={addForm.role}
+                  onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value as ApiUser['role'] }))}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  <option value="admin">Admin</option>
+                  <option value="dispatcher">Dispatcher</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border">
+              <button onClick={() => setAddModalOpen(false)} disabled={adding} className="px-4 py-2 text-sm font-600 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">Cancel</button>
+              <button
+                onClick={handleAddUser}
+                disabled={adding}
+                className="flex items-center gap-2 px-5 py-2 text-sm font-600 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-60"
+              >
+                {adding && <Loader2 size={14} className="animate-spin" />}
+                {adding ? 'Creating…' : 'Create User'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal */}
       {modalOpen && editTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-card border border-border rounded-2xl shadow-xl w-full max-w-md">

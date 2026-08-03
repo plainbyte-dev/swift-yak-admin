@@ -95,8 +95,57 @@ export interface ApiShipment {
   eta: string | null;
   deliveredAt?: string | null;
   notes?: string;
+  price?: number;
+  sender?: ShipmentSender;
+  consignee?: ShipmentConsignee;
+  freight?: ShipmentFreight;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ShipmentSender {
+  name?: string;
+  email?: string;
+  phone?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  state?: string;
+  postcode?: string;
+  country?: string;
+  countryCode?: string;
+}
+
+export interface ShipmentConsignee {
+  name?: string;
+  company?: string;
+  email?: string;
+  phone?: string;
+  contact?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  state?: string;
+  postcode?: string;
+  country?: string;
+  countryCode?: string;
+}
+
+export interface ShipmentFreight {
+  houseBill?: string;
+  masterBill?: string;
+  flightNo?: string;
+  airlineCode?: string;
+  iataLoadPort?: string;
+  iataDestPort?: string;
+  portDestination?: string;
+  pieces?: number;
+  volumetricWeightKg?: number;
+  declaredValueUsd?: number;
+  currencyCode?: string;
+  contentType?: string;
+  descriptionOfGoods?: string;
+  remarks?: string;
 }
 
 export interface DashboardMetrics {

@@ -1,4 +1,4 @@
-import type { ApiCourier, ApiShipment, DashboardMetrics, ApiUser, Paginated, ApiCompany, ReportPeriod, CourierPerformance, VolumeDataPoint, CompanyPerformance, ReportsSummary } from './types';
+import type { ApiCourier, ApiShipment, DashboardMetrics, ApiUser, Paginated, ApiCompany, ReportPeriod, CourierPerformance, VolumeDataPoint, CompanyPerformance, ReportsSummary, ShipmentSender, ShipmentConsignee, ShipmentFreight } from './types';
 import type { ShipmentStatus, CourierStatus } from '@/components/ui/StatusBadge';
 
 import { API_BASE } from './env';
@@ -70,6 +70,19 @@ export function getUsers(params: GetUsersParams = {}) {
   ).toString();
 
   return request<Paginated<ApiUser>>(`/users${query ? `?${query}` : ''}`);
+}
+
+export function createUser(data: {
+  name: string;
+  email: string;
+  password: string;
+  role?: ApiUser['role'];
+  company?: string;
+}) {
+  return request<{ data: ApiUser }>('/users', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 
 export function updateUser(id: string, data: Partial<{
@@ -163,7 +176,7 @@ interface RequestOptions extends RequestInit {
   cache?: RequestCache;
 }
 
-const PUBLIC_PATHS = ['/login', '/register'];
+const PUBLIC_PATHS = ['/login'];
 
 function handleUnauthorized() {
   window.localStorage.removeItem(TOKEN_KEY);
@@ -212,21 +225,6 @@ export type UserRole = 'admin' | 'dispatcher' | 'courier' | string;
 export interface AuthResponse {
   token: string;
   user: ApiUser;
-}
-
-export function register(data: {
-  name: string;
-  email: string;
-  password: string;
-  company?: string;
-}) {
-  return request<AuthResponse>('/auth/register', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }).then((res) => {
-    setToken(res.token);
-    return res;
-  });
 }
 
 export function login(data: { email: string; password: string }) {
@@ -303,13 +301,11 @@ export function createShipment(data: {
   phone?: string;
   notes?: string;
   eta?: string;
-  // Fields needed for the printable shipping label
-  pieces?: number;
-  volumetricWeightKg?: number;
-  declaredValueUsd?: number;
-  contentType?: string;
-  originCountry?: string;
-  destinationCountry?: string;
+  // Structured shipper/consignee/freight details — feed the printable
+  // shipping label and the manifest/invoice exports.
+  sender?: Partial<ShipmentSender>;
+  consignee?: Partial<ShipmentConsignee>;
+  freight?: Partial<ShipmentFreight>;
 }) {
   return request<{ data: ApiShipment }>('/shipments', {
     method: 'POST',
@@ -325,12 +321,9 @@ export function updateShipment(id: string, data: Partial<{
   phone?: string;
   notes?: string;
   eta?: string;
-  pieces?: number;
-  volumetricWeightKg?: number;
-  declaredValueUsd?: number;
-  contentType?: string;
-  originCountry?: string;
-  destinationCountry?: string;
+  sender: Partial<ShipmentSender>;
+  consignee: Partial<ShipmentConsignee>;
+  freight: Partial<ShipmentFreight>;
 }>) {
   return request<{ data: ApiShipment }>(`/shipments/${id}`, {
     method: 'PATCH',
