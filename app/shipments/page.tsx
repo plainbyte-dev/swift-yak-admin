@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import AppLayout from '@/components/AppLayout';
-import { Plus, Search, Eye, ChevronLeft, ChevronRight, MapPin, User, ArrowRight, ChevronDown, AlertCircle, Printer, ArrowLeft, ScanLine } from 'lucide-react';
+import { Plus, Search, Eye, ChevronLeft, ChevronRight, MapPin, User, ArrowRight, ChevronDown, AlertCircle, Printer, ArrowLeft, ScanLine, Loader2, FileSpreadsheet, Receipt } from 'lucide-react';
 import { ShipmentStatusBadge, ShipmentStatus } from '@/components/ui/StatusBadge';
 import {
   getShipments,
@@ -17,6 +17,7 @@ import type { ApiShipment, ApiCourier } from '@/lib/types';
 import NewShipmentModal from '@/app/components/NewShipmentModal';
 import ShipmentLabel, { ShipmentLabelData } from '@/app/components/ShipmentLabel';
 import BarcodeScannerModal from '@/app/components/BarCodeScannerModal';
+import { exportShipmentManifest, exportInvoiceList } from '@/lib/export';
 
 const STATUS_TRANSITIONS: Record<ShipmentStatus, ShipmentStatus[]> = {
   pending: ['assigned', 'cancelled'],
@@ -38,33 +39,33 @@ const STATUS_FILTERS: { key: ShipmentStatus | 'all'; label: string; color: strin
 
 const PER_PAGE = 8;
 
-// Builds label data from an ApiShipment. Several fields (pieces, declared
-// value, content type, country codes, sender name/phone) aren't on
-// ApiShipment yet — they fall back to placeholders below until the backend
-// stores and returns them. Search "TODO: backend field" to find each one.
+// Builds label data from an ApiShipment. Falls back to sensible defaults for
+// shipments created before sender/consignee/freight details existed.
 function toLabelData(shipment: ApiShipment): ShipmentLabelData {
-  const s = shipment as any; // fields not yet in the ApiShipment type
+  const { sender, consignee, freight } = shipment;
   return {
     trackingNumber: shipment.trackingNumber,
-    originCountry: s.originCountry ?? shipment.origin.split(',').pop()?.trim().slice(0, 3).toUpperCase() ?? '—', // TODO: backend field
-    destinationCountry: s.destinationCountry ?? shipment.destination.split(',').pop()?.trim().slice(0, 3).toUpperCase() ?? '—', // TODO: backend field
-    pieces: s.pieces ?? 1, // TODO: backend field
+    originCountry: sender?.countryCode || shipment.origin.split(',').pop()?.trim().slice(0, 3).toUpperCase() || '—',
+    destinationCountry: consignee?.countryCode || shipment.destination.split(',').pop()?.trim().slice(0, 3).toUpperCase() || '—',
+    pieces: freight?.pieces ?? 1,
     actualWeightKg: shipment.weightKg,
-    volumetricWeightKg: s.volumetricWeightKg ?? shipment.weightKg, // TODO: backend field
-    declaredValueUsd: s.declaredValueUsd ?? 0, // TODO: backend field
-    contentType: s.contentType ?? 'Non-Doc', // TODO: backend field
-    description: shipment.notes || '—',
+    volumetricWeightKg: freight?.volumetricWeightKg ?? shipment.weightKg,
+    declaredValueUsd: freight?.declaredValueUsd ?? 0,
+    contentType: freight?.contentType ?? 'Non-Doc',
+    description: freight?.descriptionOfGoods || shipment.notes || '—',
     sender: {
-      name: s.senderName ?? 'Sender', // TODO: backend field
-      addressLines: [shipment.origin],
-      phone: s.senderPhone ?? '', // TODO: backend field
+      name: sender?.name || 'Sender',
+      addressLines: [sender?.address1, sender?.address2].filter((l): l is string => !!l).length
+        ? [sender?.address1, sender?.address2].filter((l): l is string => !!l)
+        : [shipment.origin],
+      phone: sender?.phone ?? '',
     },
     receiver: {
-      name: shipment.recipient,
-      address: shipment.destination,
-      city: '',
-      country: s.destCountryName ?? '', // TODO: backend field
-      phone: shipment.phone ?? '',
+      name: consignee?.name || shipment.recipient,
+      address: consignee?.address1 || shipment.destination,
+      city: consignee?.city ?? '',
+      country: consignee?.country ?? '',
+      phone: consignee?.phone || shipment.phone || '',
     },
     orderCreationDate: new Date(shipment.createdAt).toLocaleDateString('en-US'),
   };
@@ -87,6 +88,9 @@ export default function ShipmentsPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [generatingInvoices, setGeneratingInvoices] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const [viewTarget, setViewTarget] = useState<ApiShipment | null>(null);
   const [showLabel, setShowLabel] = useState(false);
@@ -200,6 +204,39 @@ export default function ShipmentsPage() {
     await Promise.all([fetchShipments(), refreshCounts()]);
   }
 
+  // Exports operate on the full filtered set, not just the current page —
+  // reuses the same search/status filter as the table.
+  async function fetchAllFilteredShipments() {
+    const res = await getShipments({ search, status: statusFilter, perPage: 1000 });
+    return res.data;
+  }
+
+  async function handleExportManifest() {
+    setExportError(null);
+    setExporting(true);
+    try {
+      const all = await fetchAllFilteredShipments();
+      await exportShipmentManifest(all);
+    } catch (err) {
+      setExportError(err instanceof ApiError ? err.message : 'Failed to export manifest.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleGenerateInvoices() {
+    setExportError(null);
+    setGeneratingInvoices(true);
+    try {
+      const all = await fetchAllFilteredShipments();
+      await exportInvoiceList(all);
+    } catch (err) {
+      setExportError(err instanceof ApiError ? err.message : 'Failed to generate invoices.');
+    } finally {
+      setGeneratingInvoices(false);
+    }
+  }
+
   // ── Assign courier ───────────────────────────────────────────────────────
   async function handleAssign(shipmentId: string, courierId: string) {
     setActionError(null);
@@ -279,24 +316,51 @@ export default function ShipmentsPage() {
           ))}
         </div>
 
-        {/* Search + Scan */}
-        <div className="flex items-center gap-2 max-w-sm">
-          <div className="relative flex-1">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              placeholder="Search by tracking #, recipient, courier..."
-              className="w-full pl-9 pr-4 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
+        {/* Search + Scan + Export */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 max-w-sm">
+            <div className="relative flex-1">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder="Search by tracking #, recipient, courier..."
+                className="w-full pl-9 pr-4 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+            <button
+              onClick={() => setScannerOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-600 bg-card border border-border rounded-lg hover:bg-muted transition-colors shrink-0"
+            >
+              <ScanLine size={14} /> Scan
+            </button>
           </div>
-          <button
-            onClick={() => setScannerOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-600 bg-card border border-border rounded-lg hover:bg-muted transition-colors shrink-0"
-          >
-            <ScanLine size={14} /> Scan
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportManifest}
+              disabled={exporting}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-600 bg-card border border-border rounded-lg hover:bg-muted transition-colors shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {exporting ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+              {exporting ? 'Exporting…' : 'Export Manifest'}
+            </button>
+            <button
+              onClick={handleGenerateInvoices}
+              disabled={generatingInvoices}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-600 bg-card border border-border rounded-lg hover:bg-muted transition-colors shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {generatingInvoices ? <Loader2 size={14} className="animate-spin" /> : <Receipt size={14} />}
+              {generatingInvoices ? 'Generating…' : 'Generate Invoices'}
+            </button>
+          </div>
         </div>
+
+        {exportError && (
+          <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <AlertCircle size={14} className="shrink-0" />
+            <span>{exportError}</span>
+          </div>
+        )}
 
         {/* Table */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
